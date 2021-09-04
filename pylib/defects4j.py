@@ -22,6 +22,9 @@ def utf8open(filename):
 def utf8open_w(filename):
     return open(filename, 'w+', encoding='utf-8', errors='ignore')
 
+def utf8open_a(filename):
+    return open(filename, 'a+', encoding='utf-8', errors='ignore')
+
 
 checkoutbase = utf8open('checkout.config').readline().strip()
 projectbase = os.path.abspath(".")
@@ -322,7 +325,12 @@ def clearcache(proj: str, id: str):
     os.system('rm '+cachepath)
 
 
+@func_set_timeout(1200)
 def rund4j(proj: str, id: str, debug=True):
+    cleanupcheckout(proj,id)
+    banlist = ['','Lang2','Time21']
+    if((proj+id).strip() in banlist):
+        return
     time_start = time.time()
     checkout(proj, id)
     cmdlines = getd4jcmdline(proj, id, debug)
@@ -334,8 +342,12 @@ def rund4j(proj: str, id: str, debug=True):
         os.system(f'rm {checkoutdir}/trace/logs/mytrace/all.log')
     cdcmd = f'cd {checkoutdir} && '
     cmdlines = [cdcmd + cmdline for cmdline in cmdlines]
-    os.system(cmdlines[0])
     with Pool(processes=1) as pool:
+        pool.map(os.system, cmdlines[0:1])
+        pool.close()
+        pool.join()
+    # os.system(cmdlines[0])
+    with Pool(processes=16) as pool:
         pool.map(os.system, cmdlines[1:])
         pool.close()
         pool.join()
@@ -347,11 +359,11 @@ def rund4j(proj: str, id: str, debug=True):
     time_end = time.time()
     if debug:
         print('d4j tracing complete after', time_end-time_start, 'sec')
-
+    utf8open_a(f'./tracetime/tracetime_{proj}.log').write(f'{id}:{time_end-time_start}\n')
 
 def rerun(proj: str, id: str):
     clearcache(proj, id)
-    cleanupcheckout(proj, id)
+    #cleanupcheckout(proj, id)
     os.system('mvn package -DskipTests')
     rund4j(proj, id)
 
@@ -364,9 +376,29 @@ def parse(proj: str, id: str, debug=True):
 
 
 def parseproj(proj: str, debug=True):
+    time_start = time.time()
     os.system('mvn compile')
-    cmdlines = [f'mvn exec:java "-Dexec.mainClass=ppfl.defects4j.GraphBuilder" "-Dexec.args={proj} {id}"' for id in range(
-        1, project_bug_nums[proj]+1)]
+    # cmdlines = [f'mvn exec:java "-Dexec.mainClass=ppfl.defects4j.GraphBuilder" "-Dexec.args={proj} {id}"' for id in range(
+    #     1, project_bug_nums[proj]+1)]
+    cmdlines = []
+    banlist = []
+    banlist = ['Lang2', 'Lang8' ,'Time21','Math7','Math10','Math13','Math14','Math15','Math16','Math17','Math39','Math44','Math54','Math59','Math64','Math65','Math68','Math71','Math74','Math78','Math100','Time25', 'Chart15']
+    if proj == 'MathandTime':
+        proj = 'Math'
+        for id in range(1, project_bug_nums[proj]+1):
+            if((proj+str(id)).strip() in banlist):
+                continue
+            cmdlines.append(f'mvn exec:java "-Dexec.mainClass=ppfl.defects4j.GraphBuilder" "-Dexec.args={proj} {id}"')
+        proj = 'Time'
+        for id in range(1, project_bug_nums[proj]+1):
+            if((proj+str(id)).strip() in banlist):
+                continue
+            cmdlines.append(f'mvn exec:java "-Dexec.mainClass=ppfl.defects4j.GraphBuilder" "-Dexec.args={proj} {id}"')
+    else:
+        for id in range(1, project_bug_nums[proj]+1):
+            if((proj+str(id)).strip() in banlist):
+                continue
+            cmdlines.append(f'mvn exec:java "-Dexec.mainClass=ppfl.defects4j.GraphBuilder" "-Dexec.args={proj} {id}"')
     if(not debug):
         for cmdline in cmdlines:
             cmdline = cmdline + '>/dev/null 2>&1'
@@ -374,12 +406,18 @@ def parseproj(proj: str, debug=True):
         pool.map(os.system, cmdlines)
         pool.close()
         pool.join()
+    time_end = time.time()
+    totaltime = time_end-time_start
+    print(f'total time: {totaltime/60}min')
     evalproj(proj)
 
 
-@func_set_timeout(1800)
+@func_set_timeout(3600)
 def fl(proj: str, id: str, debug=True):
-    cleanupcheckout(proj, id)
+    banlist = ['Math13','Math14','Lang2','Time21']
+    if((proj+id).strip() in banlist):
+        return
+    #cleanupcheckout(proj, id)
     clearcache(proj, id)
     rund4j(proj, id, debug)
     parse(proj, id, debug)
@@ -396,6 +434,25 @@ def fl_wrap(proj: str, id: str):
     cleanupcheckout(proj, id)
     eval(proj, id)
 
+def traceproj(proj:str,id: str, doBuild = True):
+    if doBuild:
+        os.system('mvn package -DskipTests')
+    if(id == 'all'):
+        time_start = time.time()
+        # cmdlines = [(proj, str(i))for i in range(1, project_bug_nums[proj]+1)]
+        cmdlines = [f'python3 s.py rund4j {proj} {i} -nb' for i in range(
+            1, project_bug_nums[proj]+1)]
+        # print(cmdlines)
+        processesnum = 1
+        with Pool(processes=processesnum) as pool:
+            pool.map(os.system, cmdlines)
+            pool.close()
+            pool.join()
+        time_end = time.time()
+        totaltime = time_end-time_start
+        print(f'total time: {totaltime/60}min')
+    else:
+        rund4j(proj,id)
 
 def testproj(proj: str):
     time_start = time.time()
@@ -407,7 +464,7 @@ def testproj(proj: str):
     if use_simple_filter:
         processesnum = 64
     else:
-        processesnum = 64
+        processesnum = 1
     with Pool(processes=processesnum) as pool:
         pool.map(os.system, cmdlines)
         pool.close()
@@ -456,7 +513,7 @@ def evalproj_method(proj: str):
                 top[j] += 1
         if result == -3:
             no_result += 1
-    print(f'top1={top[1]},top3={top[3]},top10={top[10]},failed={no_result}')
+    print(f'top1={top[1]},top3={top[3]},top5={top[5]},top10={top[10]},failed={no_result}')
 
 
 def zevalproj(proj: str):
@@ -502,6 +559,26 @@ def evalproj(proj: str):
     print(
         f'top1={top[1]},top3={top[3]},top5={top[5]},top10={top[10]},failed={no_result+crashed}')
 
+def pevalproj(proj: str):
+    no_oracle = 0
+    no_result = 0
+    not_listed = 0
+    crashed = 0
+    top = []
+    for i in range(11):
+        top.append(0)
+    allbugs = project_bug_nums[proj]
+    for i in range(1, allbugs+1):
+        result = eval(proj, str(i))
+        if(result > 0 and result <= 10):
+            for j in range(result, 11):
+                top[j] += 1
+        if result == -3:
+            no_result += 1
+        if result == -2:
+            crashed += 1
+    score = top[1]*10+top[3]*7+top[5]*5+top[10]
+    return score
 
 def eval_method(proj: str, id: str):
     try:
@@ -567,6 +644,7 @@ def eval(proj: str, id: str):
         return -2
     i = 0
     ret = -3
+    prob = 0
     lines = set()
     for line in resultfile.readlines():
         if(line.strip() == '' or line.startswith('Probabilities:') or line.startswith('Vars:') or line.startswith('Stmts:') or line.startswith('Belief propagation time')):
@@ -589,8 +667,10 @@ def eval(proj: str, id: str):
         i += 1
         if fullname in oracle_lines:
             ret = i
+            prob = float(line.split("=")[1])
             break
     print(f'{proj}{id} result ranking: {ret}')
+    # print(f'{proj}{id} result ranking: {ret}, prob = {prob}')
     return ret
 
 
@@ -626,6 +706,30 @@ def zeval(proj: str, id: str):
             break
     print(f'{proj}{id} result ranking: {ret}')
     return ret
+
+def zcompare(proj: str):
+    better =0
+    worse = 0
+    equal = 0
+    allbugs = project_bug_nums[proj]
+    for i in range(1, allbugs+1):
+        result = eval(proj, str(i))
+        zresult = zeval(proj, str(i))
+        if(result > 0 and zresult >0):
+            if(result<zresult):
+                better += 1
+            elif(result==zresult):
+                equal += 1
+            else:
+                worse += 1
+        elif(result<=0 and zresult >0):
+            worse +=1
+        elif(result>0 and zresult <=0):
+            better +=1
+        else:
+            equal +=1
+    print(
+        f'better={better},equal={equal},worse={worse}')
 
 
 def gentrigger(proj: str):
